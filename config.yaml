@@ -1,0 +1,38 @@
+name: "ICP Identity Manager"
+description: "Gives your Home Assistant instance an ICP identity for blockchain integration"
+version: "1.0.0"
+slug: "icp_identity"
+init: false
+arch:
+  - armhf
+  - armv7
+  - aarch64
+  - amd64
+  - i386
+startup: services
+boot: auto
+map:
+  - share:rw
+  - ssl
+options:
+  network: mainnet
+  generate_new_identity: false
+  canister_endpoints: []
+  backup_retention_days: 30
+  log_level: INFO
+  auto_backup_before_regenerate: true
+  web_interface_enabled: true
+schema:
+  network: "list(mainnet|testnet|local)"
+  generate_new_identity: "bool"
+  canister_endpoints: ["str"]
+  backup_retention_days: "int(1,365)"
+  log_level: "list(DEBUG|INFO|WARNING|ERROR)"
+  auto_backup_before_regenerate: "bool"
+  web_interface_enabled: "bool"
+ports:
+  8099/tcp: 8099
+webui: "http://[HOST]:[PORT:8099]"
+environment:
+  LOG_LEVEL: INFO
+image: ghcr.io/home-assistant/{arch}-addon-icp-identity 
