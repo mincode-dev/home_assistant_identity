@@ -10,16 +10,29 @@ logger = logging.getLogger(__name__)
 class HomeAssistantIntegration:
     def __init__(self, icp_manager):
         self.icp_manager = icp_manager
-        self.ha_url = "http://supervisor/core/api"
-        self.supervisor_token = os.environ.get('SUPERVISOR_TOKEN')
         
-        if not self.supervisor_token:
-            logger.warning("SUPERVISOR_TOKEN not found - HA integration may not work")
-            
+        # Auto-detect HA environment and configure accordingly
+        if os.environ.get('SUPERVISOR_TOKEN'):
+            # Running as HA addon (Supervised/OS)
+            self.ha_url = "http://supervisor/core/api"
+            self.supervisor_token = os.environ.get('SUPERVISOR_TOKEN')
+            logger.info("🏠 Detected Home Assistant addon environment")
+        elif os.environ.get('HA_TOKEN'):
+            # Running as external container with HA token
+            self.ha_url = "http://localhost:8123/api"
+            self.supervisor_token = os.environ.get('HA_TOKEN')
+            logger.info("🐳 Detected external container with HA token")
+        else:
+            # Fallback - try to connect to local HA
+            self.ha_url = "http://localhost:8123/api"
+            self.supervisor_token = None
+            logger.warning("⚠️  No HA token found - sensor creation will be skipped")
+            logger.info("💡 For HA integration, provide SUPERVISOR_TOKEN (addon) or HA_TOKEN (external)")
+        
         self.headers = {
             "Authorization": f"Bearer {self.supervisor_token}",
             "Content-Type": "application/json"
-        }
+        } if self.supervisor_token else {}
         
     async def register_icp_sensors(self):
         """Register ICP identity as HA sensors with retry logic"""

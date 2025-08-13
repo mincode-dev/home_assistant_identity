@@ -62,26 +62,69 @@ canister_endpoints:
 3. Check the logs for your generated principal ID
 4. Access the web interface at `http://homeassistant.local:8099`
 
-### Home Assistant Sensors
+### Home Assistant Integration
 
-The addon automatically creates these sensors:
+The addon provides a comprehensive Home Assistant integration with real-time sensors.
 
-- **`sensor.icp_principal`**: Your ICP Principal ID
-- **`sensor.icp_connection`**: ICP network connection status
+#### Main Sensor
 
-Use these sensors in your automations:
+- **`sensor.icp_identity`**: Complete ICP identity sensor with all attributes
+  - ✅ **Unique ID**: Ready for automations and dashboard
+  - ✅ **Dynamic Data**: Updates automatically every 30 seconds
+  - ✅ **Rich Attributes**: Principal, network, mnemonic status, backups, etc.
+
+#### Available Attributes
+
+| Attribute | Description | Example |
+|-----------|-------------|---------|
+| `principal` | ICP Principal ID | `kwkop-e55zk-...` |
+| `public_key_short` | Abbreviated public key | `6334a98b...` |
+| `network` | Network type | `mainnet` |
+| `has_mnemonic` | Mnemonic backup exists | `true/false` |
+| `backup_count` | Number of backups | `3` |
+| `connection_status` | Addon connection | `connected` |
+
+#### Example Automations
 
 ```yaml
+# Alert when mnemonic backup is missing
 automation:
-  - alias: "ICP Identity Status"
+  - alias: "ICP - Missing Mnemonic Backup"
     trigger:
       platform: state
-      entity_id: sensor.icp_connection
+      entity_id: sensor.icp_identity
+      attribute: has_mnemonic
+      to: false
     action:
-      service: notify.notify
+      service: persistent_notification.create
       data:
-        message: "ICP connection status: {{ trigger.to_state.state }}"
+        title: "ICP Security Warning"
+        message: "Create a mnemonic backup for your ICP identity!"
+
+# Log principal changes
+  - alias: "ICP - Principal Changed"
+    trigger:
+      platform: state
+      entity_id: sensor.icp_identity
+      attribute: principal
+    action:
+      service: logbook.log
+      data:
+        name: "ICP Identity"
+        message: "Principal changed to {{ trigger.to_state.attributes.principal }}"
 ```
+
+#### Integration Files
+
+All Home Assistant configuration files are available in the [`homeassistant-integration/`](homeassistant-integration/) directory:
+
+- **Setup guides** for different installation methods
+- **Configuration files** for REST and template sensors
+- **Docker integration** files
+- **Example automations** and use cases
+- **Troubleshooting guide** for common issues
+
+📁 **[View Integration Documentation →](homeassistant-integration/README.md)**
 
 ### Web Interface Features
 

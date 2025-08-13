@@ -55,33 +55,66 @@ class ICPIdentityManager:
             # Generate mnemonic (like your BIP39 approach)
             mnemo = Mnemonic("english")
             mnemonic = mnemo.generate(strength=128)
+            logger.info("✅ Mnemonic generated successfully")
             
             # Validate mnemonic
             if not mnemo.check(mnemonic):
                 raise ValueError("Generated mnemonic is invalid")
+            logger.info("✅ Mnemonic validated successfully")
             
-            # Create identity from mnemonic
-            seed = mnemo.to_seed(mnemonic)
-            self.identity = Identity.from_seed(seed[:32])
+            # Create identity from mnemonic STRING (not seed bytes)
+            logger.info(f"✅ Mnemonic string: {mnemonic[:20]}...")
+            
+            try:
+                # Pass the mnemonic STRING to ic-py, not the seed bytes
+                self.identity = Identity.from_seed(mnemonic)  # Pass mnemonic string!
+                logger.info("✅ Identity created from mnemonic successfully")
+            except Exception as e:
+                logger.error(f"❌ Error creating identity from mnemonic: {e}")
+                raise
             
             # Save encrypted mnemonic
             self._save_mnemonic(mnemonic)
+            logger.info("✅ Mnemonic saved successfully")
+            
+            # Now try to access identity properties
+            try:
+                principal_obj = self.identity.sender()
+                logger.info(f"✅ Principal object obtained: {type(principal_obj)}")
+                
+                principal_str = str(principal_obj)
+                logger.info(f"✅ Principal string: {principal_str}")
+                
+                # Get public key - it's available as .pubkey attribute (already hex string)
+                public_key_hex = self.identity.pubkey
+                logger.info(f"✅ Public key hex: {public_key_hex}")
+                
+            except Exception as e:
+                logger.error(f"❌ Error accessing identity properties: {e}")
+                raise
             
             # Save identity metadata
             identity_data = {
-                "principal": str(self.identity.sender().principal),
-                "public_key": self.identity.sender().public_key.hex(),
+                "principal": principal_str,
+                "public_key": public_key_hex,
                 "created_at": datetime.now().isoformat(),
                 "network": self.network
             }
             
-            with open(self.identity_file, 'w') as f:
-                json.dump(identity_data, f, indent=2)
+            try:
+                with open(self.identity_file, 'w', encoding='utf-8') as f:
+                    json.dump(identity_data, f, indent=2, ensure_ascii=False)
+                logger.info("✅ Identity file saved successfully")
+            except Exception as e:
+                logger.error(f"❌ Error saving identity file: {e}")
+                raise
                 
             logger.info(f"✅ Generated new ICP identity: {identity_data['principal']}")
             
         except Exception as e:
             logger.error(f"Failed to generate new identity: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             raise
         
     def _load_existing_identity(self):
@@ -109,11 +142,11 @@ class ICPIdentityManager:
             if not mnemo.check(mnemonic):
                 raise ValueError("Stored mnemonic is invalid")
                 
-            seed = mnemo.to_seed(mnemonic)
-            self.identity = Identity.from_seed(seed[:32])
+            # Use mnemonic string directly
+            self.identity = Identity.from_seed(mnemonic)
             
             # Verify loaded identity matches stored data
-            if str(self.identity.sender().principal) != identity_data["principal"]:
+            if str(self.identity.sender()) != identity_data["principal"]:
                 raise ValueError("Identity verification failed: principal mismatch")
             
             logger.info(f"✅ Loaded existing ICP identity: {self.get_principal()}")
@@ -129,7 +162,8 @@ class ICPIdentityManager:
             key = nacl.utils.random(nacl.secret.SecretBox.KEY_SIZE)
             box = nacl.secret.SecretBox(key)
             
-            encrypted = box.encrypt(mnemonic.encode())
+            # Explicitly encode as UTF-8
+            encrypted = box.encrypt(mnemonic.encode('utf-8'))
             
             with open(self.mnemonic_file, 'wb') as f:
                 f.write(key + encrypted)
@@ -179,6 +213,9 @@ class ICPIdentityManager:
             agent_url = network_urls.get(self.network, "https://ic0.app")
             self.agent = Agent(self.identity, agent_url)
             
+            # Store the URL for later reference since Agent might not expose it
+            self.agent_url = agent_url
+            
             logger.info(f"ICP agent configured for {self.network} network ({agent_url})")
             
         except Exception as e:
@@ -189,13 +226,13 @@ class ICPIdentityManager:
         """Get principal ID as string"""
         if not self.identity:
             raise RuntimeError("Identity not initialized")
-        return str(self.identity.sender().principal)
+        return str(self.identity.sender())  # sender() IS the principal
         
     def get_public_key_hex(self):
         """Get public key as hex string"""
         if not self.identity:
             raise RuntimeError("Identity not initialized")
-        return self.identity.sender().public_key.hex()
+        return self.identity.pubkey  # It's already a hex string!
         
     async def call_canister(self, canister_id, method, args=None):
         """Call canister method with proper error handling"""
@@ -223,7 +260,7 @@ class ICPIdentityManager:
             "principal": self.get_principal(),
             "public_key": self.get_public_key_hex(),
             "network": self.network,
-            "agent_url": self.agent.url if self.agent else None,
+            "agent_url": getattr(self.agent, 'url', None) if self.agent else None,
             "identity_file": self.identity_file,
             "has_mnemonic": os.path.exists(self.mnemonic_file)
         } 

@@ -7,6 +7,7 @@ from aiohttp import web
 from icp_identity import ICPIdentityManager
 from ha_integration import HomeAssistantIntegration
 from storage import IdentityStorage
+from actor_controller import CanisterRegistry, create_actor_controller
 from datetime import datetime
 
 # Setup logging
@@ -18,9 +19,10 @@ logger = logging.getLogger(__name__)
 
 class ICPIdentityAddon:
     def __init__(self):
-        self.icp_manager = ICPIdentityManager()
+        self.icp_manager = ICPIdentityManager(data_path="../test_data")
         self.ha_integration = HomeAssistantIntegration(self.icp_manager)
-        self.storage = IdentityStorage()
+        self.storage = IdentityStorage(data_path="../test_data")
+        self.canister_registry = CanisterRegistry()
         self.app = aiohttp.web.Application()
         
     async def start(self):
@@ -99,7 +101,15 @@ class ICPIdentityAddon:
         self.app.router.add_get('/backups', self._list_backups)
         self.app.router.add_post('/backup', self._create_backup)
         self.app.router.add_get('/stats', self._get_stats)
+        self.app.router.add_get('/status', self._get_status)
         self.app.router.add_get('/health', self._health_check)
+        
+        # Canister interaction endpoints
+        self.app.router.add_post('/canister/register', self._register_canister)
+        self.app.router.add_post('/canister/call', self._call_canister_method)
+        self.app.router.add_post('/canister/query', self._query_canister_method)
+        self.app.router.add_get('/canister/list', self._list_canisters)
+        self.app.router.add_post('/canister/authenticate', self._authenticate_canisters)
         
         # Add error handling middleware
         self.app.middlewares.append(self._error_middleware)
@@ -311,6 +321,77 @@ class ICPIdentityAddon:
         except Exception as e:
             logger.error(f"Error getting stats: {e}")
             return web.json_response({"error": str(e)}, status=500)
+    
+    async def _get_status(self, request):
+        """Get comprehensive status for Home Assistant integration"""
+        try:
+            logger.info("📡 Status endpoint called")
+            
+            # Get identity information
+            identity_info = self.icp_manager.get_identity_info()
+            logger.debug(f"Identity info: {identity_info}")
+            
+            # Get storage stats
+            storage_stats = self.storage.get_storage_stats()
+            logger.debug(f"Storage stats: {storage_stats}")
+            
+            # Get creation timestamp safely
+            created_at = "Unknown"
+            try:
+                identity_file = storage_stats.get('identity_file', '/data/icp_identity.json')
+                if identity_file and os.path.exists(identity_file):
+                    created_timestamp = os.path.getctime(identity_file)
+                    created_at = datetime.fromtimestamp(created_timestamp).strftime("%B %d, %Y at %I:%M:%S %p")
+            except Exception as ts_error:
+                logger.debug(f"Timestamp error: {ts_error}")
+                created_at = "Unknown"
+            
+            # Safe public key handling
+            public_key = identity_info.get('public_key', '')
+            public_key_short = 'unknown'
+            if public_key and len(public_key) > 32:
+                public_key_short = f"{public_key[:32]}..."
+            elif public_key:
+                public_key_short = public_key
+            
+            # Build comprehensive status
+            status = {
+                # Connection and state
+                "connection_status": "connected" if self.icp_manager.identity and self.icp_manager.agent else "disconnected",
+                
+                # Identity information
+                "principal": identity_info.get('principal', 'unknown'),
+                "public_key": public_key or 'unknown',
+                "public_key_short": public_key_short,
+                
+                # Network and configuration
+                "network": identity_info.get('network', 'mainnet'),
+                "agent_url": identity_info.get('agent_url', None),
+                
+                # Security and backup
+                "has_mnemonic": storage_stats.get('has_mnemonic', False),
+                "identity_file_exists": bool(storage_stats.get('identity_file')) and os.path.exists(storage_stats.get('identity_file', '')),
+                
+                # Timestamps and metadata
+                "created_at": created_at,
+                "last_updated": datetime.now().isoformat(),
+                
+                # Status indicators for automation
+                "automation_ready": True,
+                "entity_status": "active"
+            }
+            
+            logger.info("✅ Status endpoint returning data")
+            return aiohttp.web.json_response(status)
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting status: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return aiohttp.web.json_response({
+                "connection_status": "error",
+                "error": str(e)
+            }, status=500)
             
     async def _health_check(self, request):
         """Health check endpoint"""
@@ -347,6 +428,146 @@ class ICPIdentityAddon:
             except Exception as e:
                 logger.error(f"Error in maintenance loop: {e}")
                 await asyncio.sleep(60)
+    
+    # Canister interaction methods
+    async def _register_canister(self, request):
+        """Register a new canister for interaction"""
+        try:
+            data = await request.json()
+            name = data.get('name')
+            canister_id = data.get('canister_id')
+            
+            if not name or not canister_id:
+                return web.json_response(
+                    {"error": "name and canister_id are required"}, 
+                    status=400
+                )
+            
+            # Register canister
+            controller = self.canister_registry.register_canister(name, canister_id)
+            
+            return web.json_response({
+                "success": True,
+                "message": f"Canister {name} registered successfully",
+                "canister_info": controller.get_canister_info()
+            })
+            
+        except Exception as e:
+            logger.error(f"Error registering canister: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+    
+    async def _authenticate_canisters(self, request):
+        """Authenticate all registered canisters with current identity"""
+        try:
+            if not self.icp_manager.identity:
+                return web.json_response(
+                    {"error": "No identity available. Generate identity first."}, 
+                    status=400
+                )
+            
+            # Authenticate all canisters
+            results = await self.canister_registry.authenticate_all(self.icp_manager.identity)
+            
+            success_count = sum(1 for success in results.values() if success)
+            total_count = len(results)
+            
+            return web.json_response({
+                "success": True,
+                "message": f"Authentication completed: {success_count}/{total_count} successful",
+                "results": results
+            })
+            
+        except Exception as e:
+            logger.error(f"Error authenticating canisters: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+    
+    async def _call_canister_method(self, request):
+        """Call a method on a registered canister"""
+        try:
+            data = await request.json()
+            canister_name = data.get('canister_name')
+            method = data.get('method')
+            args = data.get('args', [])
+            
+            if not canister_name or not method:
+                return web.json_response(
+                    {"error": "canister_name and method are required"}, 
+                    status=400
+                )
+            
+            # Get canister controller
+            controller = self.canister_registry.get_controller(canister_name)
+            if not controller:
+                return web.json_response(
+                    {"error": f"Canister {canister_name} not found. Register it first."}, 
+                    status=404
+                )
+            
+            # Call method
+            result = await controller.call_method(method, args)
+            
+            return web.json_response({
+                "success": True,
+                "result": result,
+                "canister_name": canister_name,
+                "method": method,
+                "args": args
+            })
+            
+        except Exception as e:
+            logger.error(f"Error calling canister method: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+    
+    async def _query_canister_method(self, request):
+        """Query a method on a registered canister (read-only)"""
+        try:
+            data = await request.json()
+            canister_name = data.get('canister_name')
+            method = data.get('method')
+            args = data.get('args', [])
+            
+            if not canister_name or not method:
+                return web.json_response(
+                    {"error": "canister_name and method are required"}, 
+                    status=400
+                )
+            
+            # Get canister controller
+            controller = self.canister_registry.get_controller(canister_name)
+            if not controller:
+                return web.json_response(
+                    {"error": f"Canister {canister_name} not found. Register it first."}, 
+                    status=404
+                )
+            
+            # Query method
+            result = await controller.query_method(method, args)
+            
+            return web.json_response({
+                "success": True,
+                "result": result,
+                "canister_name": canister_name,
+                "method": method,
+                "args": args
+            })
+            
+        except Exception as e:
+            logger.error(f"Error querying canister method: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+    
+    async def _list_canisters(self, request):
+        """List all registered canisters"""
+        try:
+            canisters = self.canister_registry.list_canisters()
+            return web.json_response({
+                "success": True,
+                "canisters": canisters,
+                "count": len(canisters)
+            })
+            
+        except Exception as e:
+            logger.error(f"Error listing canisters: {e}")
+            return web.json_response({"error": str(e)}, status=500)
 
 if __name__ == "__main__":
     try:

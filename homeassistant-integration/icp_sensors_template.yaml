@@ -1,0 +1,32 @@
+template:
+- sensor:
+  - attributes:
+      device_class: identity
+      full_public_key: 6334a98bb490d419b2418250db43ef493761ae0b419ebe55bcb2859c58f77355
+      network: mainnet
+      public_key_short: 6334a98bb490d419b2418250db43ef49...
+    icon: mdi:account-key
+    name: ICP Principal ID
+    state: kwkop-e55zk-urwbr-adngd-nbguo-qfpt6-wl6qq-6tnkz-tp2da-kxbih-uqe
+    unique_id: icp_principal_ed97c8e4f6f7
+  - attributes:
+      agent_url: null
+      last_checked: '{{ now().isoformat() }}'
+      network: mainnet
+    device_class: connectivity
+    icon: '{% if is_state(''sensor.icp_connection_raw'', ''connected'') %}mdi:network{%
+      else %}mdi:network-off{% endif %}'
+    name: ICP Network Status
+    state: '{% if states(''sensor.icp_connection_raw'') == ''connected'' %}connected{%
+      else %}disconnected{% endif %}'
+    unique_id: icp_connection_ed97c8e4f6f7
+  - attributes:
+      automation_ready: true
+      has_mnemonic: true
+      identity_file_exists: false
+      network: mainnet
+      principal: kwkop-e55zk-urwbr-adngd-nbguo-qfpt6-wl6qq-6tnkz-tp2da-kxbih-uqe
+    icon: mdi:information
+    name: ICP Identity Information
+    state: initialized
+    unique_id: icp_identity_info_ed97c8e4f6f7

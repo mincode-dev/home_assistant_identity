@@ -1,0 +1,37 @@
+# Example automation that was tested and working
+# This shows how to create automations using the ICP Identity sensor
+
+- id: icp_todo_test
+  alias: ICP Todo Test Every 5 Seconds
+  description: Add item to shopping list every 5 seconds when ICP has mnemonic
+  trigger:
+  - platform: time_pattern
+    seconds: /5
+  condition:
+  - condition: state
+    entity_id: sensor.icp_identity_2  # Note: This becomes sensor.icp_identity_2 due to HA's unique ID handling
+    attribute: has_mnemonic
+    state: true  # IMPORTANT: Use boolean true, not string 'true'
+  action:
+  - service: shopping_list.add_item
+    data:
+      name: ICP test item {{ now().strftime("%H:%M:%S") }}
+  mode: single
+
+# Alternative automation using todo list (newer HA versions)
+- id: icp_todo_alternative
+  alias: ICP Todo Alternative Test
+  description: Add item to todo list when agent URL is available
+  trigger:
+  - platform: time_pattern
+    seconds: /10
+  condition:
+  - condition: template
+    value_template: "{{ state_attr('sensor.icp_identity_2', 'agent_url') != 'unknown' }}"
+  action:
+  - action: todo.add_item
+    data:
+      item: "Agent available: {{ state_attr('sensor.icp_identity_2', 'agent_url') }}"
+    target:
+      entity_id: todo.shopping_list
+  mode: single

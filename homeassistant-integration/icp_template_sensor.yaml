@@ -1,0 +1,49 @@
+# ICP Identity Template Sensor Configuration
+# This is the main sensor that users interact with for automations
+# Place this in your Home Assistant configuration.yaml file under the 'template:' section
+
+template:
+  - sensor:
+      - name: "ICP Identity"
+        unique_id: "icp_identity_consolidated_f8e2a9b3"
+        state: "{{ states('sensor.icp_addon_status_internal') }}"
+        icon: >
+          {% if is_state('sensor.icp_addon_status_internal', 'connected') %}
+            mdi:account-key
+          {% else %}
+            mdi:account-key-outline
+          {% endif %}
+        attributes:
+          # Real-time connection status
+          connection_status: "{{ states('sensor.icp_addon_status_internal') }}"
+          
+          # Dynamic identity information from addon API
+          principal: "{{ state_attr('sensor.icp_addon_status_internal', 'principal') | default('unknown') }}"
+          public_key_short: >
+            {% set pk = state_attr('sensor.icp_addon_status_internal', 'public_key') %}
+            {% if pk and pk|length > 32 %}
+              {{ pk[:32] }}...
+            {% else %}
+              {{ pk | default('unknown') }}
+            {% endif %}
+          full_public_key: "{{ state_attr('sensor.icp_addon_status_internal', 'public_key') | default('unknown') }}"
+          
+          # Network configuration
+          network: "{{ state_attr('sensor.icp_addon_status_internal', 'network') | default('mainnet') }}"
+          
+          # Security and storage status
+          has_mnemonic: "{{ state_attr('sensor.icp_addon_status_internal', 'has_mnemonic') | default(false) }}"
+          identity_file_exists: >
+            {% set file = state_attr('sensor.icp_addon_status_internal', 'identity_file') %}
+            {{ file is not none and file != '' }}
+          backup_count: "{{ state_attr('sensor.icp_addon_status_internal', 'backup_count') | default(0) }}"
+          data_size_mb: "{{ state_attr('sensor.icp_addon_status_internal', 'data_size_mb') | default(0) }}"
+          
+          # Timestamps
+          last_checked: "{{ now().isoformat() }}"
+          created_at: "{{ (state_attr('sensor.icp_addon_status_internal', 'identity_file') | default('/data/icp_identity.json')) | file_modified if (state_attr('sensor.icp_addon_status_internal', 'identity_file') | default('/data/icp_identity.json')) else 'unknown' }}"
+          
+          # Status indicators
+          automation_ready: true
+          entity_status: "dynamic"
+          unique_id: "icp_identity_consolidated_f8e2a9b3"
