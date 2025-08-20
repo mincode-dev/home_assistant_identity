@@ -93,19 +93,19 @@ Copy these to your `automations.yaml` or use them as inspiration for your own au
 
 The `sensor.icp_identity` entity provides these attributes for automations:
 
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `principal` | string | ICP Principal ID |
-| `public_key_short` | string | Abbreviated public key |
-| `full_public_key` | string | Complete public key |
-| `network` | string | Network (mainnet/local) |
-| `has_mnemonic` | boolean | Whether mnemonic backup exists |
-| `identity_file_exists` | boolean | Whether identity file exists |
-| `backup_count` | number | Number of backups |
-| `data_size_mb` | number | Data directory size |
-| `connection_status` | string | Addon connection status |
-| `automation_ready` | boolean | Always true |
-| `entity_status` | string | "dynamic" |
+| Attribute              | Type        | Description                    |
+|------------------------|-------------|--------------------------------|
+| `principal`            | string      | ICP Principal ID               |
+| `public_key_short`     | string      | Abbreviated public key         |
+| `full_public_key`      | string      | Complete public key            |
+| `network`              | string      | Network (mainnet/local)        |
+| `has_mnemonic`         | boolean     | Whether mnemonic backup exists |
+| `identity_file_exists` | boolean     | Whether identity file exists   |
+| `backup_count`         | number      | Number of backups              |
+| `data_size_mb`         | number      | Data directory size            |
+| `connection_status`    | string      | Addon connection status        |
+| `automation_ready`     | boolean     | Always true                    |
+| `entity_status`        | string      | "dynamic"                      |
 
 ## 🔍 Troubleshooting
 

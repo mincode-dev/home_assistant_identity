@@ -17,7 +17,7 @@ class ICPIdentityManager:
     def __init__(self, data_path="/data"):
         self.data_path = data_path
         self.identity_file = os.path.join(data_path, "icp_identity.json")
-        self.mnemonic_file = os.path.join(data_path, "mnemonic.enc")
+        self.mnemonic_file = os.path.join(data_path, "mnemonic.mne")
         self.identity = None
         self.agent = None
         self.network = "mainnet"  # Default to mainnet

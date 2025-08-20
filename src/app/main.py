@@ -4,12 +4,15 @@ import asyncio
 import logging
 import aiohttp.web
 from aiohttp import web
-from icp_identity import ICPIdentityManager
-from ha_integration import HomeAssistantIntegration
-from storage import IdentityStorage
+from identity.legacy_identity import ICPIdentityManager
+from integrations.home_assistant import HomeAssistantIntegration
+from core.storage import IdentityStorage
+from core.canister_registry import CanisterRegistry
 from controllers.actor_controller import ActorController, create_actor_controller
 from identity.local_ic_identity import LocalICIdentity
+from utils.candid_parser import CandidParser
 from datetime import datetime
+from .dashboard_template import generate_dashboard_html
 
 # Setup logging
 logging.basicConfig(
@@ -23,10 +26,14 @@ class ICPIdentityAddon:
         self.icp_manager = ICPIdentityManager(data_path="/data")
         self.ha_integration = HomeAssistantIntegration(self.icp_manager)
         self.storage = IdentityStorage(data_path="/data")
+        self.canister_registry = CanisterRegistry(data_path="/data")
         # New actor controller for canister interactions
         self.actor_controller = None
         self.local_identity = None
         self.app = aiohttp.web.Application()
+        
+        # Dynamic canister endpoints will be added here
+        self.canister_routes = {}
         
     async def start(self):
         """Start the addon with comprehensive error handling"""
@@ -45,6 +52,9 @@ class ICPIdentityAddon:
             
             # Initialize new actor controller with environment setup
             await self._setup_actor_controller(options, network)
+            
+            # Ensure identity is ready for canister binding
+            await self._ensure_identity_ready()
             
             # Register with Home Assistant
             await self.ha_integration.register_icp_sensors()
@@ -156,6 +166,24 @@ class ICPIdentityAddon:
             os.environ['ICP_LEDGER_CANISTER'] = options['icp_ledger_canister']
         
         logger.info(f"Environment setup: {os.environ.get('DFX_HOST')}, M_AUTONOME: {os.environ.get('M_AUTONOME_CANISTER', 'Not set')}")
+    
+    async def _ensure_identity_ready(self):
+        """Ensure local identity is created and ready for canister binding."""
+        try:
+            if not self.local_identity or not self.local_identity.identity:
+                logger.info("🔐 Creating local identity for canister binding...")
+                self.local_identity = LocalICIdentity()
+                await self.local_identity.initialize()
+                
+                if self.local_identity.identity:
+                    logger.info(f"✅ Identity ready: {self.local_identity.get_principal_id()}")
+                else:
+                    logger.error("❌ Failed to create local identity")
+            else:
+                logger.info(f"✅ Identity already ready: {self.local_identity.get_principal_id()}")
+                
+        except Exception as e:
+            logger.error(f"Failed to ensure identity ready: {e}")
             
     def _setup_web_routes(self):
         """Setup web interface routes with error handling"""
@@ -168,12 +196,14 @@ class ICPIdentityAddon:
         self.app.router.add_get('/status', self._get_status)
         self.app.router.add_get('/health', self._health_check)
         
-        # Canister interaction endpoints
-        self.app.router.add_post('/canister/register', self._register_canister)
-        self.app.router.add_post('/canister/call', self._call_canister_method)
-        self.app.router.add_post('/canister/query', self._query_canister_method)
-        self.app.router.add_get('/canister/list', self._list_canisters)
-        self.app.router.add_post('/canister/authenticate', self._authenticate_canisters)
+        # Canister management endpoints
+        self.app.router.add_get('/canisters/list', self._list_canisters)
+        self.app.router.add_post('/canisters/add', self._add_canister)
+        self.app.router.add_delete('/canisters/{canister_id}', self._remove_canister)
+        self.app.router.add_get('/canisters/{canister_id}', self._get_canister_info)
+        
+        # Setup dynamic canister method routes
+        self._setup_dynamic_canister_routes()
         
         # Add error handling middleware
         self.app.middlewares.append(self._error_middleware)
@@ -191,124 +221,17 @@ class ICPIdentityAddon:
             )
         
     async def _web_dashboard(self, request):
-        """Enhanced web dashboard with error handling"""
+        """Enhanced web dashboard with canister management"""
         try:
             stats = self.storage.get_storage_stats()
             backups = self.storage.list_backups()
             identity_info = self.icp_manager.get_identity_info()
+            canisters = self.canister_registry.list_canisters()
+            actor_principal = self.local_identity.get_principal_id() if self.local_identity else None
             
-            html = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>ICP Identity Manager</title>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <style>
-                    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f5f5f5; }}
-                    .container {{ max-width: 900px; margin: 0 auto; padding: 20px; }}
-                    .header {{ text-align: center; margin-bottom: 30px; padding: 30px; background: white; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-                    .info-box {{ background: white; padding: 25px; border-radius: 12px; margin: 20px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-                    .button {{ background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; margin: 8px; font-weight: 500; transition: all 0.2s; }}
-                    .button:hover {{ background: #0056b3; transform: translateY(-1px); }}
-                    .button.danger {{ background: #dc3545; }}
-                    .button.danger:hover {{ background: #c82333; }}
-                    .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin: 25px 0; }}
-                    .stat-card {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 12px; text-align: center; }}
-                    .stat-card h4 {{ margin: 0 0 10px 0; font-size: 14px; opacity: 0.9; }}
-                    .stat-card p {{ margin: 0; font-size: 24px; font-weight: bold; }}
-                    .status-badge {{ display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }}
-                    .status-connected {{ background: #d4edda; color: #155724; }}
-                    code {{ background: #f8f9fa; padding: 4px 8px; border-radius: 4px; font-family: 'Monaco', 'Consolas', monospace; font-size: 13px; }}
-                    .network-info {{ background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; padding: 15px; border-radius: 8px; margin: 15px 0; }}
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <h1>🏠 ICP Identity Manager</h1>
-                        <p>Home Assistant Internet Computer Protocol Integration</p>
-                        <div class="status-badge status-connected">Connected</div>
-                    </div>
-                    
-                    <div class="info-box">
-                        <h3>Identity Information</h3>
-                        <p><strong>Principal:</strong> <code>{identity_info['principal']}</code></p>
-                        <p><strong>Public Key:</strong> <code>{identity_info['public_key'][:32]}...</code></p>
-                        <div class="network-info">
-                            <strong>Network:</strong> {identity_info['network'].upper()} 
-                            <small>({identity_info.get('agent_url', 'N/A')})</small>
-                        </div>
-                    </div>
-                    
-                    <div class="stats">
-                        <div class="stat-card">
-                            <h4>Backup Files</h4>
-                            <p>{stats['backup_count']}</p>
-                        </div>
-                        <div class="stat-card">
-                            <h4>Data Size</h4>
-                            <p>{stats['data_size_mb']:.1f} MB</p>
-                        </div>
-                        <div class="stat-card">
-                            <h4>Backup Size</h4>
-                            <p>{stats['backup_size_mb']:.1f} MB</p>
-                        </div>
-                        <div class="stat-card">
-                            <h4>Mnemonic Status</h4>
-                            <p>{'✅ Stored' if identity_info['has_mnemonic'] else '❌ Missing'}</p>
-                        </div>
-                    </div>
-                    
-                    <div style="text-align: center; margin-top: 30px;">
-                        <button class="button" onclick="createBackup()">📦 Create Backup</button>
-                        <button class="button" onclick="window.open('/stats', '_blank')">📊 View Stats</button>
-                        <button class="button danger" onclick="regenerateIdentity()">🔄 Regenerate Identity</button>
-                    </div>
-                    
-                    <div class="info-box">
-                        <h3>Recent Backups</h3>
-                        {'<p>No backups available</p>' if not backups else ''.join([f'<p>📁 {backup["created_at"][:19].replace("T", " ")}</p>' for backup in backups[:5]])}
-                    </div>
-                </div>
-                
-                <script>
-                    async function regenerateIdentity() {{
-                        if (confirm('⚠️ This will generate a new identity and cannot be undone.\\n\\nA backup will be created automatically.\\n\\nContinue?')) {{
-                            try {{
-                                const response = await fetch('/regenerate', {{method: 'POST'}});
-                                if (response.ok) {{
-                                    alert('✅ Identity regenerated successfully!\\nOld identity backed up automatically.');
-                                    location.reload();
-                                }} else {{
-                                    const error = await response.text();
-                                    alert('❌ Failed to regenerate identity: ' + error);
-                                }}
-                            }} catch (error) {{
-                                alert('❌ Network error: ' + error.message);
-                            }}
-                        }}
-                    }}
-                    
-                    async function createBackup() {{
-                        try {{
-                            const response = await fetch('/backup', {{method: 'POST'}});
-                            if (response.ok) {{
-                                alert('✅ Backup created successfully!');
-                                location.reload();
-                            }} else {{
-                                const error = await response.text();
-                                alert('❌ Failed to create backup: ' + error);
-                            }}
-                        }} catch (error) {{
-                            alert('❌ Network error: ' + error.message);
-                        }}
-                    }}
-                </script>
-            </body>
-            </html>
-            """
+            html = generate_dashboard_html(identity_info, stats, backups, canisters, actor_principal)
             return aiohttp.web.Response(text=html, content_type='text/html')
+
             
         except Exception as e:
             logger.error(f"Error rendering dashboard: {e}")
@@ -493,12 +416,154 @@ class ICPIdentityAddon:
                 logger.error(f"Error in maintenance loop: {e}")
                 await asyncio.sleep(60)
     
-    # Canister interaction methods using new actor controller
-    async def _register_canister(self, request):
-        """Register a new canister - now uses environment variables"""
+    def _setup_dynamic_canister_routes(self):
+        """Setup dynamic routes for all registered canisters."""
+        canisters = self.canister_registry.list_canisters()
+        
+        for canister in canisters:
+            canister_id = canister["id"]
+            self._add_canister_routes(canister_id)
+    
+    def _add_canister_routes(self, canister_id: str):
+        """Add dynamic routes for a specific canister based on its .did file."""
+        try:
+            # Load and parse the .did file
+            did_file_path = f"data/m_autonome_canister.did"  # For now, use the main .did file
+            
+            if os.path.exists(did_file_path):
+                with open(did_file_path, 'r') as f:
+                    did_content = f.read()
+                
+                methods = CandidParser.parse_did_file(did_content)
+                
+                # Add routes for each method
+                for method in methods:
+                    method_name = method["name"]
+                    http_method = method["http_method"]
+                    route_path = f'/canisters/{canister_id}/{method_name}'
+                    
+                    # Create handler for this specific method
+                    handler = self._create_canister_method_handler(canister_id, method_name, method["is_query"])
+                    
+                    if http_method == "GET":
+                        self.app.router.add_get(route_path, handler)
+                    else:
+                        self.app.router.add_post(route_path, handler)
+                    
+                    logger.info(f"✅ Added route: {http_method} {route_path}")
+                
+                # Update registry with available methods
+                method_names = [m["name"] for m in methods]
+                self.canister_registry.update_canister_methods(canister_id, method_names)
+                
+        except Exception as e:
+            logger.error(f"Failed to add routes for canister {canister_id}: {e}")
+    
+    def _create_canister_method_handler(self, canister_id: str, method_name: str, is_query: bool):
+        """Create a dynamic handler for a canister method."""
+        async def handler(request):
+            try:
+                # Update usage tracking
+                self.canister_registry.update_canister_usage(canister_id)
+                
+                # Ensure we have an actor controller for this canister
+                if not self.actor_controller:
+                    # Set environment and create controller
+                    os.environ['M_AUTONOME_CANISTER'] = canister_id
+                    self.actor_controller = create_actor_controller('M_AUTONOME')
+                    
+                    if self.local_identity and self.local_identity.identity:
+                        await self.actor_controller.authenticate(self.local_identity.identity)
+                
+                if not self.actor_controller.get_is_authenticated():
+                    return web.json_response(
+                        {"error": f"Not authenticated with canister {canister_id}"}, 
+                        status=401
+                    )
+                
+                # Get arguments from request
+                if request.method == "POST":
+                    try:
+                        data = await request.json()
+                        args = data.get('args', [])
+                    except:
+                        args = []
+                else:
+                    # GET request - args from query parameters
+                    args = []
+                
+                # Call the method
+                if method_name == 'login':
+                    result = await self.actor_controller.login()
+                elif method_name == 'register' and len(args) >= 4:
+                    result = await self.actor_controller.register(args[0], args[1], args[2], args[3])
+                elif method_name == 'getConversations':
+                    result = await self.actor_controller.get_conversations()
+                else:
+                    # Generic method call
+                    actor = self.actor_controller.get_actor()
+                    if not actor:
+                        return web.json_response({"error": "Actor not available"}, status=500)
+                    
+                    if is_query:
+                        result = await actor._query_method(method_name, args)
+                    else:
+                        result = await actor._call_method(method_name, args)
+                
+                return web.json_response({
+                    "success": True,
+                    "canister_id": canister_id,
+                    "method": method_name,
+                    "result": result,
+                    "is_query": is_query
+                })
+                
+            except Exception as e:
+                logger.error(f"Error calling {method_name} on {canister_id}: {e}")
+                return web.json_response({"error": str(e)}, status=500)
+        
+        return handler
+    
+    async def _auto_authenticate_canister(self, canister_id: str) -> bool:
+        """Automatically authenticate with a canister when it's added."""
+        try:
+            logger.info(f"🔐 Auto-authenticating with canister {canister_id}...")
+            
+            if not self.local_identity or not self.local_identity.identity:
+                logger.error("No local identity available for authentication")
+                return False
+            
+            # Set environment for this canister
+            os.environ['M_AUTONOME_CANISTER'] = canister_id
+            
+            # Create new actor controller for this canister
+            if self.actor_controller:
+                await self.actor_controller.deauthenticate()
+            
+            self.actor_controller = create_actor_controller('M_AUTONOME')
+            
+            # Authenticate with the canister
+            await self.actor_controller.authenticate(self.local_identity.identity)
+            
+            if self.actor_controller.get_is_authenticated():
+                logger.info(f"✅ Successfully authenticated with canister {canister_id}")
+                return True
+            else:
+                logger.warning(f"⚠️ Authentication with canister {canister_id} failed")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Auto-authentication failed for {canister_id}: {e}")
+            return False
+
+    # Canister management methods
+    async def _add_canister(self, request):
+        """Add a new canister to the registry."""
         try:
             data = await request.json()
             canister_id = data.get('canister_id')
+            name = data.get('name')
+            network = data.get('network', 'mainnet')
             
             if not canister_id:
                 return web.json_response(
@@ -506,201 +571,95 @@ class ICPIdentityAddon:
                     status=400
                 )
             
-            # Set the canister ID in environment for the actor controller
-            os.environ['M_AUTONOME_CANISTER'] = canister_id
+            # Add to registry
+            success = self.canister_registry.add_canister(canister_id, name, network)
             
-            # Recreate actor controller with new canister ID
-            if self.actor_controller:
-                await self.actor_controller.deauthenticate()
+            if not success:
+                return web.json_response(
+                    {"error": f"Canister {canister_id} already exists"}, 
+                    status=409
+                )
             
-            self.actor_controller = create_actor_controller('M_AUTONOME')
-            if self.local_identity and self.local_identity.identity:
-                await self.actor_controller.authenticate(self.local_identity.identity)
+            # Add dynamic routes for this canister
+            self._add_canister_routes(canister_id)
+            
+            # Automatically authenticate with the canister
+            auth_success = await self._auto_authenticate_canister(canister_id)
             
             return web.json_response({
                 "success": True,
-                "message": f"Canister {canister_id} registered successfully",
+                "message": f"Canister {canister_id} added successfully",
                 "canister_id": canister_id,
-                "authenticated": self.actor_controller.get_is_authenticated() if self.actor_controller else False
+                "name": name,
+                "network": network,
+                "authenticated": auth_success,
+                "principal": self.local_identity.get_principal_id() if self.local_identity else None
             })
             
         except Exception as e:
-            logger.error(f"Error registering canister: {e}")
+            logger.error(f"Error adding canister: {e}")
             return web.json_response({"error": str(e)}, status=500)
     
-    async def _authenticate_canisters(self, request):
-        """Authenticate with canisters using new actor controller"""
+    async def _remove_canister(self, request):
+        """Remove a canister from the registry."""
         try:
-            logger.info("🔐 Authenticating with canisters using new actor controller...")
+            canister_id = request.match_info['canister_id']
             
-            if not self.local_identity or not self.local_identity.identity:
+            success = self.canister_registry.remove_canister(canister_id)
+            
+            if not success:
                 return web.json_response(
-                    {"error": "No local identity available. Please restart the service."}, 
-                    status=400
+                    {"error": f"Canister {canister_id} not found"}, 
+                    status=404
                 )
             
-            if not self.actor_controller:
-                return web.json_response(
-                    {"error": "Actor controller not initialized. Please register a canister first."}, 
-                    status=400
-                )
-            
-            # Try to authenticate
-            await self.actor_controller.authenticate(self.local_identity.identity)
-            is_authenticated = self.actor_controller.get_is_authenticated()
-            
-            if is_authenticated:
-                # Try a test login to verify it works
-                try:
-                    login_result = await self.actor_controller.login()
-                    logger.info(f"✅ Test login result: {login_result}")
-                    
-                    return web.json_response({
-                        "success": True,
-                        "message": "Authentication and test login successful",
-                        "authenticated": True,
-                        "test_login": login_result,
-                        "principal": self.local_identity.get_principal_id()
-                    })
-                except Exception as login_error:
-                    logger.warning(f"Authentication successful but test login failed: {login_error}")
-                    return web.json_response({
-                        "success": True,
-                        "message": "Authentication successful (test login failed - normal for first time)",
-                        "authenticated": True,
-                        "principal": self.local_identity.get_principal_id(),
-                        "note": "Test login failed - you may need to register first"
-                    })
-            else:
-                return web.json_response({
-                    "success": False,
-                    "message": "Authentication failed",
-                    "authenticated": False
-                }, status=500)
-            
-        except Exception as e:
-            logger.error(f"Error authenticating canisters: {e}")
-            return web.json_response({"error": str(e)}, status=500)
-    
-    async def _call_canister_method(self, request):
-        """Call a method on the actor controller"""
-        try:
-            data = await request.json()
-            method = data.get('method')
-            args = data.get('args', [])
-            
-            if not method:
-                return web.json_response(
-                    {"error": "method is required"}, 
-                    status=400
-                )
-            
-            if not self.actor_controller:
-                return web.json_response(
-                    {"error": "Actor controller not initialized. Register a canister first."}, 
-                    status=400
-                )
-            
-            if not self.actor_controller.get_is_authenticated():
-                return web.json_response(
-                    {"error": "Not authenticated. Call /canister/authenticate first."}, 
-                    status=401
-                )
-            
-            # Use convenience methods for known methods
-            if method == 'login':
-                result = await self.actor_controller.login()
-            elif method == 'register' and len(args) >= 4:
-                result = await self.actor_controller.register(args[0], args[1], args[2], args[3])
-            elif method == 'getConversations':
-                result = await self.actor_controller.get_conversations()
-            else:
-                # For other methods, call the actor directly
-                actor = self.actor_controller.get_actor()
-                if not actor:
-                    return web.json_response({"error": "Actor not available"}, status=500)
-                result = await actor._call_method(method, args)
+            # TODO: Remove dynamic routes (requires route cleanup)
             
             return web.json_response({
                 "success": True,
-                "result": result,
-                "method": method,
-                "args": args
+                "message": f"Canister {canister_id} removed successfully"
             })
             
         except Exception as e:
-            logger.error(f"Error calling canister method: {e}")
+            logger.error(f"Error removing canister: {e}")
             return web.json_response({"error": str(e)}, status=500)
     
-    async def _query_canister_method(self, request):
-        """Query a method on the actor controller (read-only)"""
+    async def _get_canister_info(self, request):
+        """Get information about a specific canister."""
         try:
-            data = await request.json()
-            method = data.get('method')
-            args = data.get('args', [])
+            canister_id = request.match_info['canister_id']
             
-            if not method:
+            canister_info = self.canister_registry.get_canister(canister_id)
+            
+            if not canister_info:
                 return web.json_response(
-                    {"error": "method is required"}, 
-                    status=400
+                    {"error": f"Canister {canister_id} not found"}, 
+                    status=404
                 )
-            
-            if not self.actor_controller:
-                return web.json_response(
-                    {"error": "Actor controller not initialized. Register a canister first."}, 
-                    status=400
-                )
-            
-            if not self.actor_controller.get_is_authenticated():
-                return web.json_response(
-                    {"error": "Not authenticated. Call /canister/authenticate first."}, 
-                    status=401
-                )
-            
-            # Use convenience method for getConversations
-            if method == 'getConversations':
-                result = await self.actor_controller.get_conversations()
-            else:
-                # For other methods, call the actor directly
-                actor = self.actor_controller.get_actor()
-                if not actor:
-                    return web.json_response({"error": "Actor not available"}, status=500)
-                result = await actor._query_method(method, args)
             
             return web.json_response({
                 "success": True,
-                "result": result,
-                "method": method,
-                "args": args
+                "canister": {
+                    "id": canister_id,
+                    **canister_info
+                }
             })
             
         except Exception as e:
-            logger.error(f"Error querying canister method: {e}")
+            logger.error(f"Error getting canister info: {e}")
             return web.json_response({"error": str(e)}, status=500)
+    
+
     
     async def _list_canisters(self, request):
-        """List current actor controller status"""
+        """List all registered canisters"""
         try:
-            if not self.actor_controller:
-                return web.json_response({
-                    "success": True,
-                    "message": "No actor controller initialized",
-                    "canisters": [],
-                    "count": 0
-                })
-            
-            canister_info = {
-                "canister_id": os.environ.get('M_AUTONOME_CANISTER', 'Not set'),
-                "network": os.environ.get('DFX_NETWORK', 'Not set'),
-                "host": os.environ.get('DFX_HOST', 'Not set'),
-                "authenticated": self.actor_controller.get_is_authenticated(),
-                "principal": self.local_identity.get_principal_id() if self.local_identity else None
-            }
+            canisters = self.canister_registry.list_canisters()
             
             return web.json_response({
                 "success": True,
-                "canisters": [canister_info],
-                "count": 1
+                "canisters": canisters,
+                "count": len(canisters)
             })
             
         except Exception as e:

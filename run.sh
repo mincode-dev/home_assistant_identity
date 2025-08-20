@@ -1,11 +1,10 @@
 #!/bin/bash
-set -e
 
-echo "Starting ICP Identity Manager addon..."
+# ICP Identity Addon Runner Script for Docker
+echo "🚀 Starting ICP Identity Addon..."
 
-# Ensure data directory exists
-mkdir -p /data
+# Set Python path for Docker container
+export PYTHONPATH="/app:$PYTHONPATH"
 
-# Start the Python application
-cd /app
-python main.py 
+# Start the application
+python app/main.py

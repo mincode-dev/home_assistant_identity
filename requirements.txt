@@ -1,8 +1,27 @@
-ic-py>=1.0.0
+# Core dependencies
 aiohttp>=3.8.0
-pynacl>=1.5.0
-cryptography>=3.4.8
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# Cryptographic dependencies
 mnemonic>=0.20
+ecdsa>=0.18.0
+cryptography>=41.0.0
+bip32>=3.4
+
+# IC-specific libraries
+ic-py>=1.0.0
+cbor2>=5.4.0
+requests>=2.31.0
+
+# Utilities
+httpx>=0.24.0
+uuid>=1.30
+
+# Home Assistant integration
+PyNaCl>=1.5.0
+paho-mqtt
+PyYAML
 
 # Development and testing dependencies
 pytest>=7.0.0
