@@ -240,6 +240,7 @@ class ICActor:
                 # A) If we got true Candid bytes -> decode using return type (auto or provided)
                 if isinstance(raw_or_tree, (bytes, bytearray)):
                     rtype = return_type or self._extract_return_type(method_name)
+                    print(f"Return type: {rtype}")
                     if rtype:
                         decoded = decode(raw_or_tree, rtype)
                     else:
@@ -294,6 +295,7 @@ class ICActor:
           - Candid reply bytes (preferred), or
           - a Python structure already decoded by ic-py (list/dict with hashed keys).
         """
+        print(f"Raw call: {method_name} with args: {args}")
         arg_blob = encode(args or [])  # () -> encode([])
         can_id = getattr(self.canister, "canister_id", None) or getattr(self.canister, "_canister_id")
         if not can_id:

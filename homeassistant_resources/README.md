@@ -14,7 +14,7 @@ http(s)://<ha-host>:8123/local/icp_addon/icp-addon-card.js
 
 Tip: if you can open that URL in a browser (you should see the JS), the path is correct.
 
-##Expose it as a Lovelace resource (UI method)
+## Expose it as a Lovelace resource (UI method)
 
 In Home Assistant, go to your Profile and enable Advanced Mode (required to see Resources).
 
