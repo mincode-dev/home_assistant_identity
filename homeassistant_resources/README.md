@@ -2,7 +2,7 @@
 
 ## Adding the project to home assistant
 
-Copy the whole project inside the home assistant root folder. After this step is done, modify the home assistant `docker-compose.yml` by adding this config:
+Copy the whole project inside the home assistant root folder. Once this step is done, modify the home assistant `docker-compose.yml` by adding this service config under homeassistant config section:
 
 ``` yaml
 ic-api:
@@ -23,11 +23,16 @@ ic-api:
 
 # Add a custom JS card to a Home Assistant dashboard
 
-## Put the file in www
+## Copy the card file in www
 
 Place your card at:
 ```
 /config/www/icp_addon/icp-addon-card.js
+```
+If there is no www directory, create it. Go to home assistant root folder and run:
+
+``` bash 
+mkdir -p /config/www/icp_addon
 ```
 
 After saving, the file will be served at:
