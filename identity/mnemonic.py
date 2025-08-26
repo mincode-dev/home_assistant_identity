@@ -10,7 +10,7 @@ class MnemonicManager:
     def __init__(self, mnemonic_path: str = DEFAULT_MNEMONIC_PATH, regenerate: bool = False):
         self._mnemonic_path = mnemonic_path
         self._mnemonic = self._read_mnemonic()
-        print(self._mnemonic)
+        
         if not self._mnemonic or regenerate:
             self._mnemonic = self._generate_mnemonic()
             self._write_mnemonic(self._mnemonic)

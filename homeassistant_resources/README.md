@@ -1,3 +1,26 @@
+# Project integration
+
+## Adding the project to home assistant
+
+Copy the whole project inside the home assistant root folder. After this step is done, modify the home assistant `docker-compose.yml` by adding this config:
+
+``` yaml
+ic-api:
+    container_name: ic-api
+    build:
+      context: ./home_assistant_identity  # <-- path to the folder with your Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8099:8099"                 # your API listens on 8099 (from the Dockerfile CMD)
+    environment:
+      - TZ=Europe/Bucharest
+      - IC_URL=https://icp-api.io   # or http://dfx:4943 in local dev
+    # - CANISTER_ID=3y3bg-2qaaa-aaaaj-azroa-cai
+    # if your project needs any data files at runtime, you can mount them here:
+    # volumes:
+    #   - ./home_assistant_identity/data:/app/data:ro
+```
+
 # Add a custom JS card to a Home Assistant dashboard
 
 ## Put the file in www
