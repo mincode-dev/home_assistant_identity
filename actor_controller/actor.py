@@ -2,7 +2,7 @@ import os, re
 from typing import Any, List, Optional, Union
 
 from ic.canister import Canister
-from ic.candid import encode, decode
+from ic.candid import encode, decode, Types
 try:
     from ic.principal import Principal as ICPrincipal  # for isinstance checks
 except Exception:
@@ -100,43 +100,50 @@ class ICActor:
 
     def _build_field_hash_map(self, did_text: str) -> dict[int, str]:
         """
-        Parse the .did and collect ALL record field names and variant alt names
-        (including unit alts like 'oneOnOne;'), then map candid-hash -> name.
+        Parse the .did and collect ALL record field names and variant labels.
+        Important: we do NOT filter out keywords like 'text'/'nat' if they appear
+        in *label positions*; Candid allows those as labels, and they hash on-wire.
         """
         src = _strip_candid_comments(did_text)
         names: set[str] = set()
 
-        # record { "field" : T; field : T; ... }
+        # -------- 1) RECORD FIELDS: record { "field" : T; field : T; ... } --------
+        # Match a quoted or bare identifier immediately before a colon
         for body in _iter_balanced_blocks(src, "record"):
             for m in re.finditer(r'(?:"([^"]+)"|([A-Za-z_][\w-]*))\s*:', body):
                 nm = m.group(1) or m.group(2)
                 if nm:
                     names.add(nm)
 
-        # variant { Alt; "Alt"; Alt : T; "Alt" : T; ... }
-        reserved = {
-            "null","bool","text","blob","nat","nat8","nat16","nat32","nat64",
-            "int","int8","int16","int32","int64","float32","float64","principal",
-            "vec","opt","record","variant","service","func","oneway",
-        }
-        ident = r'[A-Za-z_][\w-]*'
+        # -------- 2) VARIANT LABELS: variant { A; "B"; C : T; "D" : T; ... } ------
         for body in _iter_balanced_blocks(src, "variant"):
-            # Quoted alts (allow followed by :, }, , or ;)
-            for m in re.finditer(r'"([^"]+)"\s*(?=[:},;])', body):
-                nm = m.group(1).strip()
+            # 2a) Typed arms: label before ':'
+            for m in re.finditer(r'(?:"([^"]+)"|([A-Za-z_][\w-]*))\s*:', body):
+                nm = m.group(1) or m.group(2)
                 if nm:
                     names.add(nm)
-            # Bare alts (unit or typed) — allow :, }, , or ;
-            for m in re.finditer(rf'({ident})\s*(?=[:}},;])', body):
-                nm = m.group(1)
-                if nm and nm not in reserved:
+
+            # 2b) Unit arms: label at arm boundaries (start|{,|; then label then ,|;|})
+            # This avoids picking up type tokens because those follow a ':' rather than a boundary.
+            for m in re.finditer(
+                r'(?:(?<=^)|(?<=[{,;]))\s*(?:"([^"]+)"|([A-Za-z_][\w-]*))\s*(?=[,;}])',
+                body,
+            ):
+                nm = m.group(1) or m.group(2)
+                if nm:
                     names.add(nm)
 
-        # common arms
+        # Common tags that sometimes aren’t explicitly present (cheap safety net)
         names.update({"ok", "err"})
 
+        # Build hash -> name map
         mapping = {self._candid_hash(n): n for n in names}
-        print(f"Built hash->name map with {len(mapping)} entries")
+
+        # Helpful diagnostics (keep short)
+        print(f"Built hash->name map with {len(mapping)} entries; "
+            f"includes 'text'? {'yes' if self._candid_hash('text') in mapping else 'no'} "
+            f"(hash={self._candid_hash('text')})")
+
         return mapping
 
     # --------- tree normalization (dynamic) ---------
@@ -292,11 +299,22 @@ class ICActor:
     def _raw_call(self, method_name: str, args: Optional[List[Any]]) -> Union[bytes, dict, list]:
         """
         Submit a raw call and return either:
-          - Candid reply bytes (preferred), or
-          - a Python structure already decoded by ic-py (list/dict with hashed keys).
+        - Candid reply bytes (preferred), or
+        - a Python structure already decoded by ic-py (list/dict with hashed keys).
         """
         print(f"Raw call: {method_name} with args: {args}")
-        arg_blob = encode(args or [])  # () -> encode([])
+
+        # >>> FIX: build a typed-params list for ic-py's encoder
+        # register : (text, text, text, text) -> (...)
+        typed_params = [{'type': Types.Text, 'value': v} for v in (args or [])]
+        arg_blob = encode(typed_params)   # encode takes ONE argument (the typed list), not (values, types)
+
+        # tiny sanity check
+        try:
+            print(f"encoded args head={bytes(arg_blob)[:4]!r}")  # should be b'DIDL'
+        except Exception:
+            pass
+
         can_id = getattr(self.canister, "canister_id", None) or getattr(self.canister, "_canister_id")
         if not can_id:
             raise RuntimeError("Cannot find canister id on Canister instance")
@@ -312,7 +330,9 @@ class ICActor:
             return raw[0]
         return raw
 
-    # --- Introspection helper (unchanged) ---
+
+    # --- Introspection helper ---
+    
     def get_methods(self):
         return self._exposed_methods()
 
