@@ -14,13 +14,13 @@ class ICAgent:
         self._invalidated = False
         self.client = Client(url=host)
         self.agent = Agent(identity, self.client)
-        print(f"✅ Real IC agent created for {host}")
+        print(f"IC agent created for {host}")
     
     async def fetch_root_key(self):
         """Fetch root key for local development."""
         if 'localhost' in self.host or '127.0.0.1' in self.host:
             await self.agent.fetch_root_key()
-            print(f"✅ Fetched root key for local development")
+            print(f"Fetched root key for local development")
     
     def replace_identity(self, new_identity):
         """Replace the current identity."""

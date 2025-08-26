@@ -9,6 +9,7 @@ except Exception:
     ICPrincipal = None  # library might not expose at import time
 
 from utils.parsers.subacount_parsers import transform_login_result
+from utils.helpers import strip_candid_comments, iter_balanced_blocks
 from .agent import ICAgent
 
 DECODE_ERRORS = (
@@ -16,47 +17,6 @@ DECODE_ERRORS = (
     "Message length smaller",
     "IDL error",
 )
-
-# ---------- DID parsing helpers (dynamic; no hardcoded mappings) ----------
-
-def _strip_candid_comments(src: str) -> str:
-    """Remove // line and /* block */ comments."""
-    src = re.sub(r"//.*?$", "", src, flags=re.M)
-    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
-    return src
-
-def _iter_balanced_blocks(src: str, keyword: str):
-    """
-    Yield inner text for '<keyword> { ... }' blocks with nested braces handled.
-    Works for 'record' and 'variant'.
-    """
-    i, n = 0, len(src)
-    kw = keyword
-    while i < n:
-        j = src.find(kw, i)
-        if j < 0:
-            break
-        k = j + len(kw)
-        while k < n and src[k].isspace():
-            k += 1
-        if k >= n or src[k] != "{":
-            i = j + 1
-            continue
-        depth, start = 0, k + 1
-        k += 1
-        while k < n:
-            c = src[k]
-            if c == "{":
-                depth += 1
-            elif c == "}":
-                if depth == 0:
-                    yield src[start:k]
-                    i = k + 1
-                    break
-                depth -= 1
-            k += 1
-        else:
-            break
 
 class ICActor:
     def __init__(self, agent: ICAgent, canister_id: str):
@@ -104,19 +64,19 @@ class ICActor:
         Important: we do NOT filter out keywords like 'text'/'nat' if they appear
         in *label positions*; Candid allows those as labels, and they hash on-wire.
         """
-        src = _strip_candid_comments(did_text)
+        src = strip_candid_comments(did_text)
         names: set[str] = set()
 
         # -------- 1) RECORD FIELDS: record { "field" : T; field : T; ... } --------
         # Match a quoted or bare identifier immediately before a colon
-        for body in _iter_balanced_blocks(src, "record"):
+        for body in iter_balanced_blocks(src, "record"):
             for m in re.finditer(r'(?:"([^"]+)"|([A-Za-z_][\w-]*))\s*:', body):
                 nm = m.group(1) or m.group(2)
                 if nm:
                     names.add(nm)
 
         # -------- 2) VARIANT LABELS: variant { A; "B"; C : T; "D" : T; ... } ------
-        for body in _iter_balanced_blocks(src, "variant"):
+        for body in iter_balanced_blocks(src, "variant"):
             # 2a) Typed arms: label before ':'
             for m in re.finditer(r'(?:"([^"]+)"|([A-Za-z_][\w-]*))\s*:', body):
                 nm = m.group(1) or m.group(2)
@@ -330,9 +290,8 @@ class ICActor:
             return raw[0]
         return raw
 
-
     # --- Introspection helper ---
-    
+
     def get_methods(self):
         return self._exposed_methods()
 
