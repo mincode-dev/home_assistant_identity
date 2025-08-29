@@ -34,19 +34,20 @@ A Python-based identity management system for Internet Computer (IC) canisters, 
 
 1. **Build the Docker image**
    ```bash
-   docker build -t home-assistant-identity .
+   docker build --platform=linux/arm64/v8 --build-arg BUILD_FROM=ghcr.io/home-assistant/aarch64-base-python:3.12-alpine3.20 -t ic-identity .
    ```
 
 2. **Run the container**
 
    **Detached mode (recommended for production):**
    ```bash
-   docker run -d --name ic-identity-api -p 8099:8099 home-assistant-identity
+   docker run -d --name ic-identity -p 8099:8099 ic-identity
+
    ```
 
    **Attached mode (for debugging):**
    ```bash
-   docker run -it --rm -p 8099:8099 home-assistant-identity
+   docker run -it --rm -p 8099:8099 ic-identity
    ```
 
 3. **Test the API**
@@ -153,16 +154,6 @@ curl -X POST http://localhost:8099/api/v1/canisters/add \
   -d '{"canister_id": "your-canister-id", "canister_name": "my-canister"}'
 ```
 
-### Docker Testing
-
-```bash
-# Build and test in one command
-docker build -t home-assistant-identity . && \
-docker run -d --name test-api -p 8099:8099 home-assistant-identity && \
-sleep 5 && \
-curl http://localhost:8099/health && \
-docker stop test-api && docker rm test-api
-```
 
 ## 🐛 Troubleshooting
 
@@ -179,10 +170,10 @@ docker stop test-api && docker rm test-api
 2. **Docker container won't start**
    ```bash
    # Check logs
-   docker logs ic-identity-api
+   docker logs ic-identity
    
    # Run interactively for debugging
-   docker run -it --rm -p 8099:8099 home-assistant-identity python main.py
+   docker run -it --rm -p 8099:8099 ic-identity python main.py
    ```
 
 3. **Dependencies not found**
@@ -195,5 +186,5 @@ docker stop test-api && docker rm test-api
 
 The application logs to stdout/stderr. In Docker:
 ```bash
-docker logs ic-identity-api -f
+docker logs ic-identity -f
 ```
