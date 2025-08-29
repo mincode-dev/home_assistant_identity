@@ -8,8 +8,8 @@ try:
 except Exception:
     ICPrincipal = None  # library might not expose at import time
 
-from utils.parsers.subacount_parsers import transform_login_result
-from utils.helpers import strip_candid_comments, iter_balanced_blocks
+from ..utils.parsers.subacount_parsers import transform_login_result
+from ..utils.helpers import strip_candid_comments, iter_balanced_blocks
 from .agent import ICAgent
 
 DECODE_ERRORS = (

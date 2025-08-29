@@ -1,6 +1,6 @@
 from aiohttp import web
 from typing import Dict, Any
-from identity.identity_manager import IdentityManager
+from ...identity.identity_manager import IdentityManager
 
 class IdentityController:
     def __init__(self, identity_manager: IdentityManager):

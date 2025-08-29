@@ -6,10 +6,10 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, Optional
 
-from actor_controller.actor import ICActor
-from actor_controller.agent import ICAgent
-from identity.ic_identity import ICIdentity
-from identity.ic_private_key import ICPrivateKey
+from ..actor_controller.actor import ICActor
+from ..actor_controller.agent import ICAgent
+from .ic_identity import ICIdentity
+from .ic_private_key import ICPrivateKey
 
 logger = logging.getLogger(__name__)
 

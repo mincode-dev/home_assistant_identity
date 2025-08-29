@@ -1,0 +1,19 @@
+# ic_identity/config.yaml
+name: "IC Identity Manager"
+version: "1.0.0"
+slug: "ic_identity"
+description: "Internet Computer Identity Management for Home Assistant"
+url: "https://github.com/mincode-dev/home_assistant_identity/tree/main/ic_identity"
+arch: [armhf, armv7, aarch64, amd64, i386]
+startup: application
+init: false
+ports:
+  "8099/tcp": 8099
+ports_description:
+  "8099/tcp": "IC Identity Manager API"
+options:
+  port: 8099
+  log_level: info
+schema:
+  port: int(1024,65535)
+  log_level: list(trace|debug|info|notice|warning|error|fatal)

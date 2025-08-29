@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import signal
-from api import ApiServer
+from .api.api import ApiServer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -1,9 +1,9 @@
 import logging
 from aiohttp import web
 
-from api.controllers.canister_controller import CanisterController
-from api.controllers.identity_controller import IdentityController
-from identity.identity_manager import IdentityManager
+from .controllers.canister_controller import CanisterController
+from .controllers.identity_controller import IdentityController
+from ..identity.identity_manager import IdentityManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
